@@ -26,4 +26,4 @@ deploy:
   skip_cleanup: true
   on:
     repo: Rhialto/k-9
-    branch: rhialto/master
+    branch: rhialto/5.4-MAINT
