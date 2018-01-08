@@ -59,6 +59,7 @@ import com.fsck.k9.controller.MessagingControllerCommands.PendingMarkAllAsRead;
 import com.fsck.k9.controller.MessagingControllerCommands.PendingMoveOrCopy;
 import com.fsck.k9.controller.MessagingControllerCommands.PendingSetFlag;
 import com.fsck.k9.controller.ProgressBodyFactory.ProgressListener;
+import com.fsck.k9.controller.imap.ImapMessageStore;
 import com.fsck.k9.helper.Contacts;
 import com.fsck.k9.mail.Address;
 import com.fsck.k9.mail.AuthenticationFailedException;
@@ -121,7 +122,7 @@ import static com.fsck.k9.mail.Flag.X_REMOTE_COPY_STARTED;
 public class MessagingController {
     public static final long INVALID_MESSAGE_ID = -1;
 
-    private static final Set<Flag> SYNC_FLAGS = EnumSet.of(Flag.SEEN, Flag.FLAGGED, Flag.ANSWERED, Flag.FORWARDED);
+    public static final Set<Flag> SYNC_FLAGS = EnumSet.of(Flag.SEEN, Flag.FLAGGED, Flag.ANSWERED, Flag.FORWARDED);
 
 
     private static MessagingController inst = null;
@@ -140,6 +141,8 @@ public class MessagingController {
     private final ExecutorService threadPool = Executors.newCachedThreadPool();
     private final MemorizingMessagingListener memorizingMessagingListener = new MemorizingMessagingListener();
     private final TransportProvider transportProvider;
+
+    private ImapMessageStore imapMessageStore;
 
 
     private MessagingListener checkMailListener = null;
@@ -254,6 +257,19 @@ public class MessagingController {
         throw new Error(e);
     }
 
+    private RemoteMessageStore getRemoteMessageStore(Account account) {
+        return account.getStoreUri().startsWith("imap") ? getImapMessageStore() : null;
+    }
+
+    private ImapMessageStore getImapMessageStore() {
+        if (imapMessageStore == null) {
+            imapMessageStore = new ImapMessageStore(notificationController, this, context);
+        }
+
+        return imapMessageStore;
+    }
+
+
     public void addListener(MessagingListener listener) {
         listeners.add(listener);
         refreshListener(listener);
@@ -296,7 +312,7 @@ public class MessagingController {
         cache.unhideMessages(messages);
     }
 
-    private boolean isMessageSuppressed(LocalMessage message) {
+    public boolean isMessageSuppressed(LocalMessage message) {
         long messageId = message.getDatabaseId();
         long folderId = message.getFolder().getDatabaseId();
 
@@ -721,6 +737,16 @@ public class MessagingController {
     @VisibleForTesting
     void synchronizeMailboxSynchronous(final Account account, final String folder, final MessagingListener listener,
             Folder providedRemoteFolder) {
+        RemoteMessageStore remoteMessageStore = getRemoteMessageStore(account);
+        if (remoteMessageStore != null) {
+            remoteMessageStore.sync(account, folder, listener, providedRemoteFolder);
+        } else {
+            synchronizeMailboxSynchronousLegacy(account, folder, listener);
+        }
+    }
+
+    void synchronizeMailboxSynchronousLegacy(Account account, String folder, MessagingListener listener) {
+
         Folder remoteFolder = null;
         LocalFolder tLocalFolder = null;
 
@@ -761,53 +787,42 @@ public class MessagingController {
             tLocalFolder = localStore.getFolder(folder);
             final LocalFolder localFolder = tLocalFolder;
             localFolder.open(Folder.OPEN_MODE_RW);
-            localFolder.updateLastUid();
             Map<String, Long> localUidMap = localFolder.getAllMessagesAndEffectiveDates();
 
-            if (providedRemoteFolder != null) {
-                Timber.v("SYNC: using providedRemoteFolder %s", folder);
-                remoteFolder = providedRemoteFolder;
-            } else {
-                Store remoteStore = account.getRemoteStore();
+            Store remoteStore = account.getRemoteStore();
 
-                Timber.v("SYNC: About to get remote folder %s", folder);
-                remoteFolder = remoteStore.getFolder(folder);
+            Timber.v("SYNC: About to get remote folder %s", folder);
+            remoteFolder = remoteStore.getFolder(folder);
 
-                if (!verifyOrCreateRemoteSpecialFolder(account, folder, remoteFolder, listener)) {
-                    return;
-                }
-
-
-                /*
-                 * Synchronization process:
-                 *
-                Open the folder
-                Upload any local messages that are marked as PENDING_UPLOAD (Drafts, Sent, Trash)
-                Get the message count
-                Get the list of the newest K9.DEFAULT_VISIBLE_LIMIT messages
-                getMessages(messageCount - K9.DEFAULT_VISIBLE_LIMIT, messageCount)
-                See if we have each message locally, if not fetch it's flags and envelope
-                Get and update the unread count for the folder
-                Update the remote flags of any messages we have locally with an internal date newer than the remote message.
-                Get the current flags for any messages we have locally but did not just download
-                Update local flags
-                For any message we have locally but not remotely, delete the local message to keep cache clean.
-                Download larger parts of any new messages.
-                (Optional) Download small attachments in the background.
-                 */
-
-                /*
-                 * Open the remote folder. This pre-loads certain metadata like message count.
-                 */
-                Timber.v("SYNC: About to open remote folder %s", folder);
-
-                if (Expunge.EXPUNGE_ON_POLL == account.getExpungePolicy()) {
-                    Timber.d("SYNC: Expunging folder %s:%s", account.getDescription(), folder);
-                    remoteFolder.expunge();
-                }
-                remoteFolder.open(Folder.OPEN_MODE_RO);
-
+            if (!verifyOrCreateRemoteSpecialFolder(account, folder, remoteFolder, listener)) {
+                return;
             }
+
+
+            /*
+             * Synchronization process:
+             *
+            Open the folder
+            Upload any local messages that are marked as PENDING_UPLOAD (Drafts, Sent, Trash)
+            Get the message count
+            Get the list of the newest K9.DEFAULT_VISIBLE_LIMIT messages
+            getMessages(messageCount - K9.DEFAULT_VISIBLE_LIMIT, messageCount)
+            See if we have each message locally, if not fetch it's flags and envelope
+            Get and update the unread count for the folder
+            Update the remote flags of any messages we have locally with an internal date newer than the remote message.
+            Get the current flags for any messages we have locally but did not just download
+            Update local flags
+            For any message we have locally but not remotely, delete the local message to keep cache clean.
+            Download larger parts of any new messages.
+            (Optional) Download small attachments in the background.
+             */
+
+            /*
+             * Open the remote folder. This pre-loads certain metadata like message count.
+             */
+            Timber.v("SYNC: About to open remote folder %s", folder);
+
+            remoteFolder.open(Folder.OPEN_MODE_RO);
 
             notificationController.clearAuthenticationErrorNotification(account, true);
 
@@ -975,20 +990,17 @@ public class MessagingController {
                     System.currentTimeMillis());
 
         } finally {
-            if (providedRemoteFolder == null) {
-                closeFolder(remoteFolder);
-            }
-
+            closeFolder(remoteFolder);
             closeFolder(tLocalFolder);
         }
 
     }
 
-    void handleAuthenticationFailure(Account account, boolean incoming) {
+    public void handleAuthenticationFailure(Account account, boolean incoming) {
         notificationController.showAuthenticationErrorNotification(account, incoming);
     }
 
-    private void updateMoreMessages(Folder remoteFolder, LocalFolder localFolder, Date earliestDate, int remoteStart)
+    public void updateMoreMessages(Folder remoteFolder, LocalFolder localFolder, Date earliestDate, int remoteStart)
             throws MessagingException, IOException {
 
         if (remoteStart == 1) {
@@ -1098,12 +1110,6 @@ public class MessagingController {
         final List<Message> largeMessages = new ArrayList<>();
         final List<Message> smallMessages = new ArrayList<>();
         if (!unsyncedMessages.isEmpty()) {
-
-            /*
-             * Reverse the order of the messages. Depending on the server this may get us
-             * fetch results for newest to oldest. If not, no harm done.
-             */
-            Collections.sort(unsyncedMessages, new UidReverseComparator());
             int visibleLimit = localFolder.getVisibleLimit();
             int listSize = unsyncedMessages.size();
 
@@ -1121,15 +1127,6 @@ public class MessagingController {
 
             fetchUnsyncedMessages(account, remoteFolder, unsyncedMessages, smallMessages, largeMessages, progress, todo,
                     fp);
-
-            String updatedPushState = localFolder.getPushState();
-            for (Message message : unsyncedMessages) {
-                String newPushState = remoteFolder.getNewPushState(updatedPushState, message);
-                if (newPushState != null) {
-                    updatedPushState = newPushState;
-                }
-            }
-            localFolder.setPushState(updatedPushState);
 
             Timber.d("SYNC: Synced unsynced messages for folder %s", folder);
         }
@@ -1316,16 +1313,6 @@ public class MessagingController {
                 });
     }
 
-    private boolean shouldImportMessage(final Account account, final Message message,
-            final Date earliestDate) {
-
-        if (account.isSearchByDateCapable() && message.olderThan(earliestDate)) {
-            Timber.d("Message %s is older than %s, hence not saving", message.getUid(), earliestDate);
-            return false;
-        }
-        return true;
-    }
-
     private <T extends Message> void downloadSmallMessages(final Account account, final Folder<T> remoteFolder,
             final LocalFolder localFolder,
             List<T> smallMessages,
@@ -1336,8 +1323,6 @@ public class MessagingController {
             FetchProfile fp) throws MessagingException {
         final String folder = remoteFolder.getName();
 
-        final Date earliestDate = account.getEarliestPollDate();
-
         Timber.d("SYNC: Fetching %d small messages for folder %s", smallMessages.size(), folder);
 
         remoteFolder.fetch(smallMessages,
@@ -1345,12 +1330,6 @@ public class MessagingController {
                     @Override
                     public void messageFinished(final T message, int number, int ofTotal) {
                         try {
-
-                            if (!shouldImportMessage(account, message, earliestDate)) {
-                                progress.incrementAndGet();
-
-                                return;
-                            }
 
                             // Store the updated message locally
                             final LocalMessage localMessage = localFolder.storeSmallMessage(message, new Runnable() {
@@ -1409,17 +1388,11 @@ public class MessagingController {
             final int todo,
             FetchProfile fp) throws MessagingException {
         final String folder = remoteFolder.getName();
-        final Date earliestDate = account.getEarliestPollDate();
 
         Timber.d("SYNC: Fetching large messages for folder %s", folder);
 
         remoteFolder.fetch(largeMessages, fp, null);
         for (T message : largeMessages) {
-
-            if (!shouldImportMessage(account, message, earliestDate)) {
-                progress.incrementAndGet();
-                continue;
-            }
 
             if (message.getBody() == null) {
                 downloadSaneBody(account, remoteFolder, localFolder, message);
@@ -1653,7 +1626,7 @@ public class MessagingController {
         });
     }
 
-    private void processPendingCommandsSynchronous(Account account) throws MessagingException {
+    public void processPendingCommandsSynchronous(Account account) throws MessagingException {
         LocalStore localStore = account.getLocalStore();
         List<PendingCommand> commands = localStore.getPendingCommands();
 
@@ -3709,7 +3682,7 @@ public class MessagingController {
     }
 
 
-    private boolean shouldNotifyForMessage(Account account, LocalFolder localFolder, Message message) {
+    public boolean shouldNotifyForMessage(Account account, LocalFolder localFolder, Message message) {
         // If we don't even have an account name, don't show the notification.
         // (This happens during initial account setup)
         if (account.getName() == null) {
