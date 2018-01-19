@@ -32,6 +32,7 @@ import android.widget.ListPopupWindow;
 import android.widget.ListView;
 import android.widget.TextView;
 
+import com.fsck.k9.K9;
 import com.fsck.k9.R;
 import com.fsck.k9.activity.AlternateRecipientAdapter;
 import com.fsck.k9.activity.AlternateRecipientAdapter.AlternateRecipientListener;
@@ -91,7 +92,7 @@ public class RecipientSelectView extends TokenCompleteTextView<Recipient> implem
         alternatesAdapter = new AlternateRecipientAdapter(context, this);
         alternatesPopup.setAdapter(alternatesAdapter);
 
-        // don't allow duplicates, based on equality of recipient objects, which is e-mail addresses
+        // don't allow duplicates, based on equality of recipient objects, which is email addresses
         allowDuplicates(false);
 
         // if a token is completed, pick an entry based on best guess.
@@ -605,7 +606,8 @@ public class RecipientSelectView extends TokenCompleteTextView<Recipient> implem
         }
 
         public String getDisplayNameOrAddress() {
-            String displayName = getDisplayName();
+            final String displayName = K9.showCorrespondentNames() ? getDisplayName() : null;
+    
             if (displayName != null) {
                 return displayName;
             }
