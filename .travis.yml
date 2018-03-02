@@ -25,7 +25,9 @@ deploy:
   api_key:
     secure: Z8nezCWmhHfIioSMZRvqp9Zq3DHIzEeNSuoPQlWS6GY+PczhrDZHqwzPb0dKW4RXaK/sCXh6B9d2XCvvqSf8rISMqL2xM+hTpyO6xaJsmoz5E0QZ4k1jH8uQc9B8+yv3rq2EOu+jrFXIfVm+jgMPiBDymRDWaYAy+DYVW3LoKx06rWUaaUBccSybG7zAmZgjCNJMkSEZQ6Ztk4sa7hRlUy1+3nKQkrj685wxSSXnMcaWnYRxJDWwfbpyYwmEFUEnCpjw8bXypK2WVaPjT5FibG+OCRdCOaDrQ1bh00EqP2f+NDSOyUa+l2hSRwcXtsoqbYWdO/R8xNzdnXRCPQjqaxDY5vfNZWhxvYI9AIOYP36DjOrp9Nxdh2kggRe78/ef7SVZPaoSdfYDHTOuT9BCCnnvsf4u1x3cTDy+zO1zkWXocVnsq9n7ngOQIsmUW8N6SIw89d2u1H2R4pK/tQ2GO2ehI3Y8v7oaKFzIet2F3mVOVswe6qxpmiRuF54FL//3egZC7R9lyXjbG691MXbpITNGLyqw4CThejDG6/th8KLxQb46wIbQRpuQFpny58aUw0T7oNyaGAh3lTXmHPg+Evf4TGl/G0ZRtF8ut8VkB1CM2f9wBuxXs4OZ8Qdc/7oWtXcb4LRYYgtoK3GQJgiI6pHICpz+jiUOYlNe6gr6skU=
   file_glob: true
-  file: "k9mail/build/outputs/apk/*.apk"
+  file: 
+    - "k9mail/build/outputs/apk/release/*.apk"
+    - "k9mail/build/outputs/apk/debug/*.apk"
   skip_cleanup: true
   on:
     repo: Rhialto/k-9
