@@ -30,4 +30,3 @@ deploy:
   on:
     repo: Rhialto/k-9
     all_branches: true
-
