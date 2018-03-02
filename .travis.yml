@@ -29,4 +29,3 @@ deploy:
   skip_cleanup: true
   on:
     repo: Rhialto/k-9
-    branch: rhialto/master
