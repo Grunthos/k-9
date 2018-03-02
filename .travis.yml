@@ -29,3 +29,5 @@ deploy:
   skip_cleanup: true
   on:
     repo: Rhialto/k-9
+    all_branches: true
+
